@@ -1,22 +1,37 @@
 ﻿using ChessChallenge.API;
-
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using ChessChallenge.Application;
 public class MyBot : IChessBot
 {
     Piece strongPieceInDanger;
 
     public Move Think(Board board, Timer timer)
     {
+        
+        return ReturnBestMove(board);
+    }
+
+    public Move ReturnBestMove(Board board)
+    {
         Move[] moves = board.GetLegalMoves();
 
         int currentScore = 0;
         Move currentMove = moves[new System.Random().Next(0, moves.Length)];
-        
+
         strongPieceInDanger = IsPieceInDanger(board);
 
         for (int i = 0; i < moves.Length; i++)
         {
             int moveScore = ReturnScoreFromMove(board, moves[i]);
-            if(moveScore > currentScore)
+
+            if (moveScore == int.MaxValue)
+            {
+                return moves[i];
+            }
+
+            if (moveScore > currentScore)
             {
                 currentMove = moves[i];
                 currentScore = moveScore;
@@ -24,14 +39,67 @@ public class MyBot : IChessBot
         }
         return currentMove;
     }
+
+    public Move[] ReturnOrderedMoves(Board board)
+    {
+        Move[] moves = board.GetLegalMoves();
+        List<(Move,int)> orderedMoves = new List<(Move, int)>();
+        for (int i = 0; i < moves.Length; i++)
+        {
+            orderedMoves.Add((moves[i], ReturnScoreFromMove(board, moves[i])));
+        }
+
+        orderedMoves.Sort((x, y) => (y.Item2.CompareTo(x.Item2)));
+        for (int i = 0; i < moves.Length; i++)
+        {
+            moves[i] = orderedMoves[i].Item1;
+        }
+
+        return moves;
+    }
     
+    public Move Test(Board board)
+    {
+        Move[] moves = ReturnOrderedMoves(board);
+        Move bestMove = moves[0];
+        int bestTotalMoveScore = 0;
+        for (int i = 0; i < moves.Length; i++)
+        {
+            Move currentMove = moves[i];
+            int scoreAttack = ReturnScoreFromMove(board, currentMove);
+            board.MakeMove(currentMove);
+            Move bestDefendMove = ReturnBestMove(board);
+            int scoreDefend = ReturnScoreFromMove(board, bestDefendMove);
+            board.UndoMove(currentMove);
+            int totalScore = scoreAttack - scoreDefend;
+
+            if(totalScore > bestTotalMoveScore)
+            {
+                bestMove = currentMove;
+                bestTotalMoveScore = totalScore;
+            }
+        }
+
+        return bestMove;
+    }
+
     private int ReturnScoreFromMove(Board board, Move move)
     {
         int score = 0;
 
+        if(DoesMoveCheckmate(board, move))
+        {
+            return int.MaxValue;
+        }
+
         if(move.StartSquare == strongPieceInDanger.Square)
         {
-            score += 100 * PieceScore(move.MovePieceType);
+            score += PieceScore(move.MovePieceType);
+        }
+
+        if(move.IsEnPassant)
+        {
+            return int.MaxValue;
         }
 
         if(move.IsCapture)
@@ -43,6 +111,11 @@ public class MyBot : IChessBot
         {
             score += PieceScore(move.PromotionPieceType);
         }
+
+        if(move.IsCastles)
+        {
+            score += 100;
+        }
         
         if(board.SquareIsAttackedByOpponent(move.TargetSquare))
         {
@@ -53,6 +126,8 @@ public class MyBot : IChessBot
         {
             score += 20;
         }
+
+        score += ReturnSeenSquare(board, move);
 
         return score;
     }
@@ -119,5 +194,21 @@ public class MyBot : IChessBot
         }
 
         return mostValuablePiece;
+    }
+
+    private bool DoesMoveCheckmate(Board board, Move move)
+    {
+        board.MakeMove(move);
+        bool isInCheckmate = board.IsInCheckmate();
+        board.UndoMove(move);
+        return isInCheckmate;
+    }
+
+    private int ReturnSeenSquare(Board board, Move move)
+    {
+        int currentSquaresSeen = BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetSliderAttacks(move.MovePieceType, move.StartSquare, board));
+        int targetSquaresSeen = BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetSliderAttacks(move.MovePieceType, move.TargetSquare, board));
+        
+        return (targetSquaresSeen - currentSquaresSeen);
     }
 }
